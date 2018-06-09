@@ -1,9 +1,11 @@
 import React, { Component } from 'react';
 import {
-  View,
   Animated,
-  PanResponder,
   Dimensions,
+  LayoutAnimation,
+  PanResponder,
+  UIManager,
+  View,
 } from 'react-native';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -11,6 +13,11 @@ const SWIPE_THRESHOLD = Dimensions.get('window').width / 4;
 const SWIPE_DURATION = 275;
 
 class Deck extends Component {
+  static defaultProps = {
+    onSwipeRight: () => {},
+    onSwipeLeft: () => {},
+  }
+
   constructor(props) {
     super(props);
 
@@ -22,59 +29,94 @@ class Deck extends Component {
       },
       onPanResponderRelease: (event, gesture) => {
         if (gesture.dx > SWIPE_THRESHOLD) {
-          this.forceSwipeRight();
+          this.forceSwipe('right');
         } else if (gesture.dx < -SWIPE_THRESHOLD) {
-          console.log('swipe left');
+          this.forceSwipe('left');
         } else {
-          this.forceSwipeLeft();
+          this.resetPosition();
         }
       }
     });
 
-    this.state = { panResponder, position };
+    this.position = position;
+    this.state = { panResponder, index: 0 };
   }
 
-  forceSwipeRight() {
-    Animated.timing(this.state.position, {
-      toValue: { x: SCREEN_WIDTH, y: 0 },
+  componentWillReceiveProps(nextProps) {
+    if (nextProps.data !== this.props.data) {
+      this.state({ index: 0 });
+    }
+  }
+
+  componentWillUpdate() {
+    UIManager.setLayoutAnimationEnabledExperimental && UIManager.setLayoutAnimationEnabledExperimental(true);
+    LayoutAnimation.spring();
+  }
+
+  forceSwipe(direction) {
+    const x = direction === 'right' ? SCREEN_WIDTH : -SCREEN_WIDTH;
+    console.log('x', x);
+    Animated.timing(this.position, {
+      toValue: { x, y: 0 },
       duration: SWIPE_DURATION,
-    }).start();
+    }).start(() => this.onSwipeComplete(direction));
   }
 
   resetPosition() {
-    Animated.spring(this.state.position, {
+    Animated.spring(this.position, {
       toValue: { x: 0, y: 0 }
     }).start();
   }
 
+  onSwipeComplete(direction) {
+    const { onSwipeRight, onSwipeLeft, data } = this.props;
+    const item = data[this.state.index];
+
+    direction === 'right' ? onSwipeRight(item) : onSwipeLeft(item);
+    this.position.setValue({ x: 0, y: 0 });
+    this.setState({ index: this.state.index + 1 });
+  }
+
   getCardStyle() {
-    const { position } = this.state;
-    const rotate = position.x.interpolate({
+    const rotate = this.position.x.interpolate({
       inputRange: [-SCREEN_WIDTH * 1.5, 0, SCREEN_WIDTH * 1.5],
       outputRange: ['-120deg', '0deg', '120deg']
     });
 
     return {
-      ...position.getLayout(),
+      ...this.position.getLayout(),
       transform: [{ rotate }],
     }
   }
 
   renderCards() {
+    console.log('check', this.state.index, this.props.data.length);
+    if (this.state.index >= this.props.data.length) {
+      return this.props.renderNoMoreCards();
+    }
+    const { index: stackIndex } = this.state;
     return this.props.data.map((item, index) => {
-      if (index === 0) {
+      if (index < stackIndex) return null;
+      if (index === stackIndex) {
         return (
           <Animated.View
             key={item.id}
-            style={this.getCardStyle()}
+            style={[this.getCardStyle(), styles.cardStyle]}
             {...this.state.panResponder.panHandlers}
           >
             {this.props.renderCard(item)}
           </Animated.View>
         );
       }
-      return this.props.renderCard(item);
-    });
+      return (
+        <Animated.View
+          key={item.id}
+          style={[styles.cardStyle, { top: 10 * (index - this.state.index) }]}
+        >
+          {this.props.renderCard(item)}
+        </Animated.View>
+      );
+    }).reverse();
   }
 
   render() {
@@ -85,5 +127,12 @@ class Deck extends Component {
     );
   }
 }
+
+const styles = {
+  cardStyle: {
+    position: 'absolute',
+    width: SCREEN_WIDTH,
+  }
+};
 
 export default Deck;
